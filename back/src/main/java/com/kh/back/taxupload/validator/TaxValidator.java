@@ -1,6 +1,8 @@
 package com.kh.back.taxupload.validator;
 
+import com.kh.back.auth.security.CustomUserDetails;
 import com.kh.back.common.exception.ApiException;
+import com.kh.back.taxupload.dto.PdfParseResponseDto;
 import com.kh.back.taxupload.dto.TaxCategoryChange;
 import com.kh.back.taxupload.dto.TaxTransactionDto;
 import com.kh.back.taxupload.dto.TaxTransactionDto.TaxInputRequest;
@@ -68,9 +70,7 @@ public class TaxValidator {
         }
     }
 
-    public void validateInput(TaxInputRequest request) {
-        validateInputPresent(request);
-
+    public void validateNormalizedInput(TaxInputRequest request) {
         validateTaxYear(request.getTaxYear());
         validateDependentCount(request.getDependentCount());
 
@@ -104,19 +104,39 @@ public class TaxValidator {
         }
     }
 
-    public void validateRequestPresent(TaxServiceRequest request, String message) {
+    public void validateSaveRequest(TaxServiceRequest request) {
+        validateRequestPresent(request, "저장 요청이 필요합니다.");
+        if (request.getTaxInputId() != null) {
+            validateExistingAnalysisSave(request.getInput(), request.getTransactions());
+        }
+    }
+
+    public void validateUpdateRequest(Long taxInputId, TaxServiceRequest request) {
+        validateRequestPresent(request, "수정 요청이 필요합니다.");
+        List<TaxCategoryChange> changes = request.getChanges();
+        validateUpdateTargets(request.getInput() != null, changes != null && !changes.isEmpty());
+        validateMatchingTaxInputId(taxInputId, request.getTaxInputId());
+    }
+
+    public void validateDeleteRequest(Long taxInputId, TaxServiceRequest request, boolean deleteAll) {
+        validateRequestPresent(request, "삭제 요청이 필요합니다.");
+        validateMatchingTaxInputId(taxInputId, request.getTaxInputId());
+        validateDeleteTargets(deleteAll, request.getTransactionId(), request.getTransactionIds());
+    }
+
+    private void validateRequestPresent(TaxServiceRequest request, String message) {
         if (request == null) {
             throw invalid("request", message);
         }
     }
 
-    public void validateMatchingTaxInputId(Long pathId, Long bodyId) {
+    private void validateMatchingTaxInputId(Long pathId, Long bodyId) {
         if (bodyId != null && !Objects.equals(pathId, bodyId)) {
             throw invalid("taxInputId", "경로와 요청 본문의 분석번호가 다릅니다.");
         }
     }
 
-    public void validateExistingAnalysisSave(
+    private void validateExistingAnalysisSave(
             TaxInputRequest input,
             List<TaxTransactionDto> rows
     ) {
@@ -130,13 +150,13 @@ public class TaxValidator {
         }
     }
 
-    public void validateUpdateTargets(boolean updateProfile, boolean updateCategory) {
+    private void validateUpdateTargets(boolean updateProfile, boolean updateCategory) {
         if (!updateProfile && !updateCategory) {
             throw invalid("request", "수정할 기본정보 또는 카테고리를 전달해주세요.");
         }
     }
 
-    public void validateDeleteTargets(
+    private void validateDeleteTargets(
             boolean deleteAll,
             Long transactionId,
             List<Long> transactionIds
@@ -185,7 +205,7 @@ public class TaxValidator {
         }
     }
 
-    public void validateTransactionSource(TaxTransactionDto source, Long taxInputId) {
+    private void validateTransactionSource(TaxTransactionDto source, Long taxInputId) {
         if (source == null) {
             throw invalid("rows", "거래 목록에 빈 항목이 있습니다.");
         }
@@ -196,8 +216,7 @@ public class TaxValidator {
         validateDecimal(source.getDeductedTaxRate(), MAX_INPUT_RATE, 4, "deductedTaxRate");
 
         // 검토 중이거나 제외된 거래는 저장하지 않는다.
-        if (Boolean.TRUE.equals(source.getNeedsReview())
-                || Boolean.TRUE.equals(source.getExcluded())) {
+        if (requiresReviewOrIsExcluded(source)) {
             throw invalid("rows", "검토 대상 또는 제외한 거래는 저장할 수 없습니다.");
         }
 
@@ -207,7 +226,29 @@ public class TaxValidator {
         }
     }
 
-    public void validateCashTransaction(TaxTransactionDto row) {
+    public void validateSaveTransactionSource(TaxTransactionDto source, Long taxInputId) {
+        validateTransactionSource(source, taxInputId);
+        validateCashTransaction(source);
+    }
+
+    public boolean requiresReviewOrIsExcluded(TaxTransactionDto row) {
+        return Boolean.TRUE.equals(row.getNeedsReview()) || Boolean.TRUE.equals(row.getExcluded());
+    }
+
+    public void validateSaveTransaction(TaxTransactionDto row, Integer taxYear, int index) {
+        validateStoredTransaction(row);
+        validateStoredTransactionDate(row, taxYear);
+        // 금액과 세율의 입력 범위는 원본 검사에서 더 엄격하게 확인했다.
+        validateTransactionFields(row, "rows[" + index + "]", false);
+    }
+
+    public void validateSaveExpectedTransactionCount(int expectedCount, int existingCount) {
+        if (expectedCount < 0 || expectedCount > existingCount) {
+            throw invalid("expectedTransactionCount", "저장된 거래 목록을 확인해주세요.");
+        }
+    }
+
+    private void validateCashTransaction(TaxTransactionDto row) {
         // 공제대상금액은 실제 입출금액과 구분한다.
         if ("DEDUCTION_ELIGIBLE".equals(row.getAmountBasis())) {
             throw invalid("amount", "공제대상금액은 실제 입출금액 컬럼에 저장할 수 없습니다.");
@@ -227,7 +268,7 @@ public class TaxValidator {
         }
     }
 
-    public void validateStoredTransaction(TaxTransactionDto row) {
+    private void validateStoredTransaction(TaxTransactionDto row) {
         validateDescriptionPresent(row);
 
         if (row.getAmount() == null) {
@@ -235,7 +276,7 @@ public class TaxValidator {
         }
     }
 
-    public void validateStoredTransactionDate(TaxTransactionDto row, Integer taxYear) {
+    private void validateStoredTransactionDate(TaxTransactionDto row, Integer taxYear) {
         if (row.getTransactionDate() == null) {
             throw invalid("transactionDate", "날짜별 거래 내역만 저장할 수 있습니다.");
         }
@@ -249,7 +290,7 @@ public class TaxValidator {
         }
     }
 
-    public void validatePdfTransactionDate(TaxTransactionDto source) {
+    private void validatePdfTransactionDate(TaxTransactionDto source) {
         if (source.getTransactionDate() == null) {
             throw invalid("transactionDate", "날짜별 상세 거래 내역이 필요합니다.");
         }
@@ -258,14 +299,14 @@ public class TaxValidator {
         validateTaxYear(source.getTransactionDate().getYear());
     }
 
-    public void validateExtractedPdfTransaction(
+    public void validateParseTransaction(
             TaxTransactionDto source,
             TaxTransactionDto normalized
     ) {
         validateCashTransaction(source);
         validatePdfTransactionDate(source);
         validateStoredTransaction(normalized);
-        validateTransaction(normalized, "transactions");
+        validateTransactionFields(normalized, "transactions", true);
 
         String type = normalized.getTransactionType();
 
@@ -303,7 +344,7 @@ public class TaxValidator {
         }
     }
 
-    public void validateNewTransactionIds(List<TaxTransactionDto> rows) {
+    public void validateSaveNewTransactionIds(List<TaxTransactionDto> rows) {
         // 최초 INSERT 대상에는 기존 거래번호를 받지 않는다.
         for (TaxTransactionDto source : rows) {
             if (source.getTransactionId() != null) {
@@ -315,21 +356,11 @@ public class TaxValidator {
         }
     }
 
-    public void validateTransactions(List<TaxTransactionDto> rows) {
-        if (rows == null || rows.isEmpty()) {
-            throw invalid("rows", "저장할 거래가 없습니다.");
-        }
-
-        for (int index = 0; index < rows.size(); index++) {
-            validateTransaction(rows.get(index), "rows[" + index + "]");
-        }
-    }
-
-    private void validateTransaction(TaxTransactionDto row, String field) {
-        if (row == null) {
-            throw invalid(field, "거래가 비어 있습니다.");
-        }
-
+    private void validateTransactionFields(
+            TaxTransactionDto row,
+            String field,
+            boolean validateAmountAndRate
+    ) {
         String type = row.getTransactionType();
 
         // 거래 구분의 null 허용은 기존 DB 구조를 따른다.
@@ -353,9 +384,13 @@ public class TaxValidator {
             throw invalid(field + ".category", "거래 구분에 맞는 카테고리를 선택해주세요.");
         }
 
-        validateDecimal(row.getAmount(), MAX_AMOUNT, 2, field + ".amount");
+        if (validateAmountAndRate) {
+            validateDecimal(row.getAmount(), MAX_AMOUNT, 2, field + ".amount");
+        }
         validateDecimal(row.getPreTaxIncome(), MAX_PRE_TAX_INCOME, 2, field + ".preTaxIncome");
-        validateDecimal(row.getDeductedTaxRate(), MAX_RATE, 4, field + ".deductedTaxRate");
+        if (validateAmountAndRate) {
+            validateDecimal(row.getDeductedTaxRate(), MAX_RATE, 4, field + ".deductedTaxRate");
+        }
 
         if ("EXPENSE".equals(type) && row.getPreTaxIncome() != null) {
             throw invalid(field + ".preTaxIncome", "지출 거래의 세전 수입은 NULL이어야 합니다.");
@@ -425,7 +460,25 @@ public class TaxValidator {
         }
     }
 
-    public byte[] validatePdf(MultipartFile file) throws IOException {
+    public void validateParseResponse(PdfParseResponseDto response) {
+        if (response == null
+                || response.getTransactions() == null
+                || response.getTransactions().isEmpty()) {
+            throw new ApiException(
+                    HttpStatus.UNPROCESSABLE_ENTITY,
+                    "PDF_TRANSACTIONS_NOT_FOUND",
+                    "PDF에서 거래 내역을 찾지 못했습니다."
+            );
+        }
+    }
+
+    public void validateParseTransactionPresent(TaxTransactionDto source) {
+        if (source == null) {
+            throw invalid("transactions", "PDF 분석 결과에 빈 거래가 있습니다.");
+        }
+    }
+
+    public byte[] validateParseFile(MultipartFile file) throws IOException {
         if (file == null || file.isEmpty()) {
             throw invalid("file", "PDF 파일이 비어 있습니다.");
         }
@@ -449,6 +502,121 @@ public class TaxValidator {
         }
 
         return bytes;
+    }
+
+    public void validateInputAccess(CustomUserDetails principal, TaxInputRequest input) {
+        if (input == null) {
+            throw new ApiException(
+                    HttpStatus.NOT_FOUND,
+                    "TAX_INPUT_NOT_FOUND",
+                    "분석을 찾을 수 없습니다."
+            );
+        }
+
+        // 비회원 분석은 소유자가 없고, 회원 분석은 소유자나 관리자에게 허용한다.
+        Long ownerId = input.getUserId();
+        if (ownerId == null || (principal != null && (
+                Objects.equals(ownerId, principal.getUserId())
+                        || principal.getAuthorities().stream()
+                        .anyMatch(authority -> "ROLE_ADMIN".equals(authority.getAuthority()))
+        ))) {
+            return;
+        }
+
+        throw new ApiException(
+                HttpStatus.FORBIDDEN,
+                "ACCESS_DENIED",
+                "해당 분석에 접근할 권한이 없습니다."
+        );
+    }
+
+    public void validateTransactionFound(List<TaxTransactionDto> rows) {
+        if (rows.isEmpty()) {
+            throw new ApiException(
+                    HttpStatus.NOT_FOUND,
+                    "TRANSACTION_NOT_FOUND",
+                    "해당 분석의 거래를 찾을 수 없습니다."
+            );
+        }
+    }
+
+    public void validateDeleteInputResult(int deleted) {
+        validateAffectedRows(deleted, 1, "TAX_INPUT_DELETE_FAILED", "분석 삭제 결과를 확인하지 못했습니다.");
+    }
+
+    public void validateDeleteTransactionResult(int deleted) {
+        validateAffectedRows(deleted, 1, "TRANSACTION_DELETE_FAILED", "거래 삭제 결과를 확인하지 못했습니다.");
+    }
+
+    public void validateUpdateCategoryResult(int updated, int expected) {
+        validateAffectedRows(updated, expected, "TRANSACTION_UPDATE_FAILED", "거래 수정 결과를 확인하지 못했습니다.");
+    }
+
+    private void validateAffectedRows(int actual, int expected, String code, String message) {
+        if (actual != expected) {
+            throw new ApiException(HttpStatus.CONFLICT, code, message);
+        }
+    }
+
+    public void validateSaveRetriedTransactions(
+            List<TaxTransactionDto> saved,
+            List<TaxTransactionDto> requested
+    ) {
+        if (!matchesSavedTransactions(saved, requested)) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "TRANSACTIONS_CHANGED",
+                    "저장된 거래가 변경됐습니다. 목록을 확인해주세요."
+            );
+        }
+    }
+
+    public void validateSaveNoExistingTransactions(List<TaxTransactionDto> existing) {
+        if (!existing.isEmpty()) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "USE_TRANSACTION_CHANGE_API",
+                    "기존 거래는 수정·삭제 API로 변경해주세요."
+            );
+        }
+    }
+
+    public boolean requiresPdfReview(TaxTransactionDto row) {
+        return !Boolean.TRUE.equals(row.getParseSuccess()) || requiresReviewOrIsExcluded(row);
+    }
+
+    public boolean matchesSavedTransactions(
+            List<TaxTransactionDto> existing,
+            List<TaxTransactionDto> requested
+    ) {
+        if (existing.size() != requested.size()) {
+            return false;
+        }
+
+        for (int index = 0; index < existing.size(); index++) {
+            TaxTransactionDto left = existing.get(index);
+            TaxTransactionDto right = requested.get(index);
+
+            if (!Objects.equals(left.getTransactionType(), right.getTransactionType())
+                    || !Objects.equals(left.getTransactionDate(), right.getTransactionDate())
+                    || !Objects.equals(left.getDescription(), right.getDescription())
+                    || !Objects.equals(left.getCategory(), right.getCategory())
+                    || !sameDecimal(left.getAmount(), right.getAmount())
+                    || !sameDecimal(left.getPreTaxIncome(), right.getPreTaxIncome())
+                    || !sameDecimal(left.getDeductedTaxRate(), right.getDeductedTaxRate())) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private boolean sameDecimal(BigDecimal left, BigDecimal right) {
+        if (left == null || right == null) {
+            return left == right;
+        }
+
+        return left.compareTo(right) == 0;
     }
 
     private ApiException invalid(String field, String message) {
