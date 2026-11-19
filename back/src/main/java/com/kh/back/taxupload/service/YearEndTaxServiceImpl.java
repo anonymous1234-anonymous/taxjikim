@@ -254,31 +254,30 @@ public class YearEndTaxServiceImpl implements YearEndTaxService {
         }
 
         try {
-            byte[] bytes = taxValidator.validateParseFile(file);
+            byte[] bytes = taxValidator.validateParseFile(file); // taxvalidator의  validateparsefile 메서드에 file을 넘겨 호출하고 반환된 바이트 배열 [byte[]을 bytes 변수에 저장한다
 
-            // Python에서 PDF 분석과 OCR을 함께 수행하도록 원본을 전달한다.
-            PdfParseResponseDto response = pythonPdfClient.analyze(
+            PdfParseResponseDto response = pythonPdfClient.analyze( // 앞줄에서 얻은 파일 내용 bytes 과 업로드할때 의 원래 파일명 file.getOriginalFilename())을 pythonpdfclient의 analyze 메서드에 전달하는 코드
                     bytes,
                     file.getOriginalFilename()
             );
 
-            taxValidator.validateParseResponse(response);
+            taxValidator.validateParseResponse(response); // 앞에서 analyze  가 반환한 pdf 분석결과 response 를 taxvalidator에 넘겨 검사
 
-            List<TaxTransactionDto> transactions = new ArrayList<>();
-            for (TaxTransactionDto source : response.getTransactions()) {
-                taxValidator.validateParseTransactionPresent(source);
+            List<TaxTransactionDto> transactions = new ArrayList<>(); // taxtransactiondto 타입의 거래 내역을 담을 빈 리스트를 만듬
+            for (TaxTransactionDto source : response.getTransactions()) { // pdf 분석결과 respoonse 에 들어있는 거래 내역을 하나씩 꺼냄 , source는 이번 차례에 꺼낸 거래 내역임
+                taxValidator.validateParseTransactionPresent(source); // 꺼낸 거래 내역을 검증 메서드에 넘김 , 메서드 이름으로 보면 거래 항목이 있는지 , ex: null인지 확인
 
-                // PDF 추출 거래는 아직 DB에 저장되지 않았으므로 식별자를 비운다.
+
                 source.setTaxInputId(null);
                 source.setTransactionId(null);
 
-                TaxTransactionDto row;
+                TaxTransactionDto row; // 거래 내역을 담을 변수 row를 선언
                 try {
-                    row = copyStoredTransaction(source, null);
-                    taxValidator.validateParseTransaction(source, row);
+                    row = copyStoredTransaction(source, null); // 반환값을 row에 저장
+                    taxValidator.validateParseTransaction(source, row); // 원본 거래 source 와 만들어진 거래 row를 넘겨 검증
                 } catch (ApiException exception) {
                     transactions.add(markPdfReview(source, exception.getMessage(), "거래 내용을 확인해주세요."));
-                    continue;
+                    continue; // try 안에서 apiexception 이 발생시 원본 거래와 예외메세지 "거내 내용을 확인해주세요" 라는 문구를 markpdfreview 에 전달하고 그 반환값을 transactions 목록에 추가, continue로 현재 거래의 나머지 처리를 건너뜀
                 }
 
                 if (taxValidator.requiresPdfReview(source)) {
@@ -286,29 +285,29 @@ public class YearEndTaxServiceImpl implements YearEndTaxService {
                     continue;
                 }
 
-                row.setActualAmount(row.getAmount());
-                row.setPageNumber(source.getPageNumber());
-                row.setRawText(source.getRawText());
-                row.setValueKind(source.getValueKind());
-                row.setAmountBasis(source.getAmountBasis());
-                row.setTaxDeducted(source.getTaxDeducted());
-                row.setDocumentYear(source.getDocumentYear());
-                row.setParseSuccess(true);
-                row.setNeedsReview(false);
-                row.setExcluded(false);
-                row.setFailureReason(null);
-                transactions.add(row);
+                row.setActualAmount(row.getAmount()); // row에 들어잇는 amount 값을 꺼내 같은 row의 actualAmount 에 넣음
+                row.setPageNumber(source.getPageNumber()); // 원본 거래 source 의 pdf 페이지 번호를 row에 복사
+                row.setRawText(source.getRawText()); // 원본 거래에 담긴 pdf 원문을 row에 복사
+                row.setValueKind(source.getValueKind()); // 원본 거래의 값 종류 valuekind 를 row에 복사
+                row.setAmountBasis(source.getAmountBasis()); // 원본 거래의 금액 기존 amountbasis 을 row에 복사
+                row.setTaxDeducted(source.getTaxDeducted()); // 원본거래의 taxdeducted 값 (공제된 세액)을 row에 복사
+                row.setDocumentYear(source.getDocumentYear()); // 우너본 거래에 기록된 문서 연도를 row에 복사
+                row.setParseSuccess(true); // 이거래를 pdf에서 성공적으로 읽었다고 표시
+                row.setNeedsReview(false); // 이 거래를 추가 화인이 필요없다고 표시 false
+                row.setExcluded(false); // 이거래의 제외 여부를 false로 설정 , 즉 제외 대상에 서 뺀다
+                row.setFailureReason(null); // 실패 사유를 비움
+                transactions.add(row); // 여기까지 채운 거래 row를 결과목록 transactions에 추가
             }
 
-            long reviewCount = transactions.stream()
-                    .filter(taxValidator::requiresReviewOrIsExcluded)
-                    .count();
+            long reviewCount = transactions.stream() // transactions 의 거래를 하나씩 처리할수 있도록 스트림을 만듬 , 최종개수는 10ng 타입의 reviewcount에 저장
+                    .filter(taxValidator::requiresReviewOrIsExcluded) // 각 거래를 taxvalidator.requiresReviewOrIsExcluded(거래) 에 넘겨, 결과가 true인 거래만 통과시킴.
+                    .count(); // 필터를 통과한 거래의 개수를 셈, 한거래가 검토 대상이면서 제외 대상이어도 한건으로 셈
 
-            // 추출 결과와 저장 상태를 구분해 반환한다.
-            response.setTransactions(transactions);
-            response.setSavedCount(0);
-            response.setPersisted(false);
-            response.setTaxInputIdsByYear(new LinkedHashMap<>());
+
+            response.setTransactions(transactions); // 앞에서 하나씩 처리해 모은 거래 목록 transactions을 응답에 넣음
+            response.setSavedCount(0); // 저장된 건수를 0으로 기록, 거래 목록에 항목이 들어있어도 저장건수는 0임
+            response.setPersisted(false); // 이 결과가 아직 저장되지 않았다고 응답에 표시
+            response.setTaxInputIdsByYear(new LinkedHashMap<>()); // 연도별 세금 입력 id를 담는 자리에 빈 맵을 넣어, linkedhashmap 은 나중에 항목을 추가하면 넣은 순서대로 꺼내 볼수 있는 맵임
 
             log.info(
                     "PDF 파싱 완료. 거래={}건, 검토={}건, DB 저장 없음",
@@ -316,67 +315,67 @@ public class YearEndTaxServiceImpl implements YearEndTaxService {
                     reviewCount
             );
 
-            return response;
-        } catch (IOException | RuntimeException exception) {
+            return response; // 처리가 성공하면 앞에서 채운 response 를 이 메서드를 호출한 쪽에 돌려줌
+        } catch (IOException | RuntimeException exception) { // try 블록에서 ioexception또는 runtimeexception 발생시 이 블록으로 들어옴
             log.warn("PDF 파싱 실패. 코드={}", failureCode(exception));
-            throw exception;
+            throw exception; // 방금 잡은 같은 예외를 다시 던져 호출한 쪽에서도 이 실패 처리 가능
         }
     }
 
-    private TaxTransactionDto markPdfReview(TaxTransactionDto row, String reason, String fallbackReason) {
-        // 검토 대상 거래는 응답에 포함하고 저장 대상에서 제외한다.
-        row.setNeedsReview(true);
-        row.setExcluded(true);
+    private TaxTransactionDto markPdfReview(TaxTransactionDto row, String reason, String fallbackReason) { // 거래 한건과 검토 사유를 받아서 검토가 필요한 거래로 표시해 돌려주는 메서드를 만듬
 
-        String reviewReason = reason == null || reason.isBlank() ? fallbackReason : reason;
-        String current = row.getFailureReason();
+        row.setNeedsReview(true); // 이 거래를 확인이 필요한 거래로 표시
+        row.setExcluded(true); // 이 거래를 제외 대상으로 표시
 
-        if (current == null || current.isBlank()) {
-            row.setFailureReason(reviewReason);
-            return row;
+        String reviewReason = reason == null || reason.isBlank() ? fallbackReason : reason; // 검토 사유로 쓸 문구를 정하고 reason이 null이거나 빈 문자열이거나 공백뿐이면 기본 문구인 fallbackReason을 쓰고 사유가 들어있으면 reason을 그대로 씀 , reason이 null 이면 앞 조건이 이미 참이라 reason.isBlank()는 실행하지 않음
+        String current = row.getFailureReason(); // 거래 row에 이미 기록된 실패 사유를 읽어서 current 에 담음, reviewReason 은 이번에 쓸 사유, current 는 기존 사유 , 이 두줄은 변수에 값을 담는 단계
+
+        if (current == null || current.isBlank()) { // 기존 실패 사유 current가 없거나, 빈 문자열이거나, 공백뿐인지 확인
+            row.setFailureReason(reviewReason); // 조건이 맞으면 앞에서 정한 검토 사유 reviewReason를 거래 row의 실패 사유로 넣음
+            return row; // 실패 사유를 채운 거래를 호출한 곳에 돌려주고 markpdfreview 메서드를 끝냄
         }
 
-        if (current.equals(reviewReason)) {
-            return row;
+        if (current.equals(reviewReason)) { // 기존 실패사유 current 와 이번에 쓸 사유 reviewreason의 문자열 내용이 같은지 확인
+            return row; // 두 문구가 같으면 기존 사유를 그대로 두고 거래 row 를 돌려줌
         }
 
-        for (String existing : current.split(" / ")) {
-            if (existing.equals(reviewReason)) {
-                return row;
+        for (String existing : current.split(" / ")) { // 기존 사유 current 를 /기준으로 나눔, ex: 날짜 누락 / 금액 오류라면 차례대로 existing에 담음
+            if (existing.equals(reviewReason)) { // 지금 꺼낸 사유  existing 가 이번 사유 reviewreason 와 글자 그대로 같은지 확인
+                return row;  // 같은 사유를 찾으면 거래를 반환하고 메서드를 끝냄으로써 같은 사유가 또 붙는걸 막음
             }
         }
 
-        row.setFailureReason(current + " / " + reviewReason);
-        return row;
+        row.setFailureReason(current + " / " + reviewReason); // 기존 실패사유 current 뒤에 /를 붙이고 그 뒤에 이번 사유 reviewreason를 이어 붙여 거래에 저장
+        return row; // 실패 사유가 갱신된 거래 row 를 호출한 곳에 돌려줌
     }
 
-    private TaxTransactionDto copyStoredTransaction(TaxTransactionDto source, Long taxInputId) {
-        String type = source.getTransactionType();
+    private TaxTransactionDto copyStoredTransaction(TaxTransactionDto source, Long taxInputId) { // 원본 거래 soure와 세금 입력 id taxinputid 를 받아 거래 객체 taxtransactionDto를 돌려주는 메서드의 시작
+        String type = source.getTransactionType(); // 원본 거래에서 거래 유형을 읽어 문자열 변수 type에 담는다
 
-        if (type == null || type.isBlank()) {
-            type = "UNKNOWN";
+        if (type == null || type.isBlank()) { // 거래 유형이 null이거나 빈문자열이거나 공백뿐인지 확인
+            type = "UNKNOWN"; // 조건에 해당하면 type 에 unknown을 넣음
         }
 
-        String category = source.getCategory();
+        String category = source.getCategory(); // 원본 거래 source 에서 분류 값을 가져와 category 변수에 담음
 
-        if (category == null || category.isBlank()) {
-            category = "UNCLASSIFIED";
+        if (category == null || category.isBlank()) { // 분류 값이 null이거나 빈문자열이거나 공백뿐인지 확인
+            category = "UNCLASSIFIED"; // 분류값이 비어 있으면 category에 unclassified 미분류 를 넣음
         }
 
-        // 실제 입출금액이 있으면 PDF 추출과 거래 저장에서 우선 사용한다.
-        BigDecimal actualAmount = source.getActualAmount();
-        BigDecimal amount = actualAmount == null ? source.getAmount() : actualAmount;
 
-        return TaxTransactionDto.builder()
-                .taxInputId(taxInputId)
-                .transactionType(type)
-                .transactionDate(source.getTransactionDate())
-                .description(source.getDescription())
-                .category(category)
-                .preTaxIncome(source.getPreTaxIncome())
-                .deductedTaxRate(source.getDeductedTaxRate())
-                .amount(amount)
-                .build();
+        BigDecimal actualAmount = source.getActualAmount(); // 원본 거래 source 에서 실제 금액을 가져와 actualamount에 담음 , bigdecimal은 금액처럼 소수점까지 정확하게 다뤄야하는 숫자에 쓰는 타입이다
+        BigDecimal amount = actualAmount == null ? source.getAmount() : actualAmount; // actulmount가 null이면 원본 거래의 getamount() 값을 사용, 값이 있으면 actualamount 를 사용, 선택한 값은 amount에 담음
+
+        return TaxTransactionDto.builder() // 새로운 taxtransactiondto 를 만들기 위해 빌더를 시작
+                .taxInputId(taxInputId) // 메서드가 받은 세금 입력id를 넣어 앞에서 null 을 넘긴 호출이라면 여기에도 null이 들어감
+                .transactionType(type) // 앞에서 정한 거래 유형을 넣는다. 원본 유형이 비어 있었다면 unknown
+                .transactionDate(source.getTransactionDate()) // 원본 거래의 거래일을 가져와 넣음
+                .description(source.getDescription()) // 원본 거래의 설명을 가져와 넣음
+                .category(category) //  앞에서 정한 거래 분류를 넣음 원본 분류가 비어 있었다면 unclassified
+                .preTaxIncome(source.getPreTaxIncome()) // 원본 거래의 세전소득을 가져와 넣음
+                .deductedTaxRate(source.getDeductedTaxRate()) // 원본거래의 deductedTaxRate 필드에 담긴 세율 값을 가져와 넣음
+                .amount(amount) // 앞에서 고른 금액을 넣음 , 실제 금액이 있으면 그 값을, null이면 원본의 amount 값을 사용
+                .build(); // 지금까지 넣은 값으로 새 거래 객체 완성
     }
 
     private TaxInputRequest normalizeInput(
