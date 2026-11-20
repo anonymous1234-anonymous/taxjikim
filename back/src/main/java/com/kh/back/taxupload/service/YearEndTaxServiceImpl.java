@@ -378,52 +378,50 @@ public class YearEndTaxServiceImpl implements YearEndTaxService {
                 .build(); // 지금까지 넣은 값으로 새 거래 객체 완성
     }
 
-    private TaxInputRequest normalizeInput(
-            TaxInputRequest source,
+    private TaxInputRequest normalizeInput( // 세금 입력 데이터를 일정한 형식으로 정리하는 메서드
+            TaxInputRequest source, // source 는 정리할 원본 세금 입력 객체임
             Long taxInputId,
             Long ownerId
     ) {
-        taxValidator.validateInputPresent(source);
+        taxValidator.validateInputPresent(source); // source 에 입력 데이터가 들어왔는지 검사하는 메서드를 호출하는부분
 
         // 분석번호와 소유자는 서버가 확인한 값으로 설정한다.
-        return TaxInputRequest.builder()
+        return TaxInputRequest.builder() // 새 taxinputrequest 를 만들 준비
                 .taxInputId(taxInputId)
                 .userId(ownerId)
-                .taxYear(source.getTaxYear())
-                .businessRegistered(source.getBusinessRegistered())
-                .dependentCount(
-                        source.getDependentCount() == null ? 0 : source.getDependentCount()
+                .taxYear(source.getTaxYear()) // source.getTaxYear()로 원본의 과세 연도를 읽고 .taxyear(...)로 새 객체를 넣음
+                .businessRegistered(source.getBusinessRegistered()) // source.getBusinessRegistered()로 원본의 사업자 등록여부를 일고 . businessRegistered(...)로 새 객체에 넣음
+                .dependentCount( source.getDependentCount() == null ? 0 : source.getDependentCount() // .dependentcount(...) 는 새 객체에 부양가족 수를 넣음
                 )
-                .generalDonationAmount(
-                        source.getGeneralDonationAmount() == null
-                                ? BigDecimal.ZERO
-                                : source.getGeneralDonationAmount()
+                .generalDonationAmount( source.getGeneralDonationAmount() == null // 원본의 일반 기부금에 값이 없는지 확인
+                                ? BigDecimal.ZERO // 값이 없으면 bigdecimal타입의 0을 사용한다
+                                : source.getGeneralDonationAmount() // 값이 있으면 원본 금액을 사용한다
                 )
-                .specialDonationAmount(
-                        source.getSpecialDonationAmount() == null
-                                ? BigDecimal.ZERO
-                                : source.getSpecialDonationAmount()
+                .specialDonationAmount( source.getSpecialDonationAmount() == null // 원본의 특별 기부금에 값이 없는지 확인
+                                ? BigDecimal.ZERO // 조건이 참이면 bigdecimal 타입의 0을 사용한다
+                                : source.getSpecialDonationAmount() // 조건이 거짓이면 원본의 특별 기부금 금액을 사용한다 , // .specialDonationAmount(...)는 이렇게 고른 값을 새 객체의 특별 기부금으로 지정
                 )
-                .saveStatus(source.getSaveStatus() == null ? "TEMP" : source.getSaveStatus())
-                .build();
+                .saveStatus( source.getSaveStatus() == null // source.getSaveStatus() == null은 원본의 저장 상태에 값이 없는지 확인
+                        ? "TEMP" : source.getSaveStatus()) // ?"TEMP" 는 값이 없으면 "TEMP"를 사용한다 ,  : source.getSaveStatus()는 값이 있으면 원본의 저장 상태를 그대로 사용한다
+                .build(); // 지금까지 지정한 값으로 새 taxinputrequest 객체를 만듬
     }
 
-    private TaxInputRequest requireInput(CustomUserDetails principal, Long taxInputId, boolean lock) {
-        taxValidator.validateId(taxInputId, "taxInputId");
+    private TaxInputRequest requireInput(CustomUserDetails principal, Long taxInputId, boolean lock) { // 세금 입력 기록을 id로 조회하고 현재 사용자의 접근 권한을 확인한뒤 그 기록을 반환
+        taxValidator.validateId(taxInputId, "taxInputId"); // 조회하기 전에 taxinputid 가 유효한지 검사, 첫 번째인자는 검사할 값이고 두번쨰 인자인 taxinputid는 검사 대상의 이름을 전달하는 문자열임
 
-        TaxInputRequest input = lock
+        TaxInputRequest input = lock // 삼항 연산자로 조회방법을 고르고 , 조회한 기록을 input에 담음 , lock이 true 이면 lockinput(...)을 호출, 이름상 조회하면서 해당 기록에 잠금을 거는 방식 , lock이 false이면 findinput(...)을 호출해 일반 조회
                 ? taxMapper.lockInput(taxInputId)
                 : taxMapper.findInput(taxInputId);
 
-        taxValidator.validateInputAccess(principal, input);
-        return input;
+        taxValidator.validateInputAccess(principal, input); // 현재 사용자 principal 이 조회한 기록 input에 접근할수 있는지 검사
+        return input; // 검사를 통과하면 조회한 기록을 호출한 곳에 돌려줌
     }
 
-    private TaxTransactionDto requireTransaction(Long taxInputId, Long transactionId) { // 특정 분석에 속한 거래 한건을 찾아 반환하는 메서드
-        List<TaxTransactionDto> rows = taxMapper.findTransactions(taxInputId, transactionId);
+    private TaxTransactionDto requireTransaction(Long taxInputId, Long transactionId) { // 특정 세금 분석에 속한 거래를 조회하고 조회결과를 검사한뒤 첫번째 거래를 반환하는 메서드
+        List<TaxTransactionDto> rows = taxMapper.findTransactions(taxInputId, transactionId); // 두 id를 taxmapper 에 넘겨 거래를 조회, 조회 결과는 거래 목록인 rows에 담김
 
-        taxValidator.validateTransactionFound(rows);
-        return rows.get(0);
+        taxValidator.validateTransactionFound(rows); // 이름상 조회된 거래가 있는지 확인 , 빈 목록에서 첫번쨰 거래를 꺼내기 전에 이 검사를 호출
+        return rows.get(0); // 검사 호출이 정상적으로 끝나면 rows의 첫번째 거래를 호출한 곳에 돌려줌
     }
 
     private void invalidateAfterTransactionChange(Long taxInputId) { // taxinputid로 어느 분석을 처리할지 받음

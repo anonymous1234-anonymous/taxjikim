@@ -583,43 +583,43 @@ public class TaxValidator {
 
     public boolean requiresPdfReview(TaxTransactionDto row) {
         return !Boolean.TRUE.equals(row.getParseSuccess()) || requiresReviewOrIsExcluded(row);
-    }
+    } // pdf 에서 거래 정보를 읽어오는데 성공했는지 나타냄,
 
-    public boolean matchesSavedTransactions(
-            List<TaxTransactionDto> existing,
-            List<TaxTransactionDto> requested
+    public boolean matchesSavedTransactions( // 저장된 거래와 일치하는가
+            List<TaxTransactionDto> existing, // 이미 저장된, 존재하는 거래 목록
+            List<TaxTransactionDto> requested // 이번 요청으로 들어온 거래 목록
     ) {
-        if (existing.size() != requested.size()) {
-            return false;
+        if (existing.size() != requested.size()) { // 저장된 거래 목록의 항목 개수 , requested.size()는 이번에 요청한 거래 목록의 항목 개수이며 두목록의 개수가 다르면 { } 안으로 들어감
+            return false; // ex: 저장된 거래가 3개이고 요청한 거래가 2개라면 바로 false 임, 둘다 3개라면 이 검사를 통과함 , 거래 내용이 같은지는 개수 검사만으로는 알수 없음
         }
 
-        for (int index = 0; index < existing.size(); index++) {
-            TaxTransactionDto left = existing.get(index);
-            TaxTransactionDto right = requested.get(index);
-
-            if (!Objects.equals(left.getTransactionType(), right.getTransactionType())
-                    || !Objects.equals(left.getTransactionDate(), right.getTransactionDate())
-                    || !Objects.equals(left.getDescription(), right.getDescription())
-                    || !Objects.equals(left.getCategory(), right.getCategory())
-                    || !sameDecimal(left.getAmount(), right.getAmount())
-                    || !sameDecimal(left.getPreTaxIncome(), right.getPreTaxIncome())
-                    || !sameDecimal(left.getDeductedTaxRate(), right.getDeductedTaxRate())) {
-                return false;
+        for (int index = 0; index < existing.size(); index++) { // 목록의 위치를 나타내는 변수 index 를 만들고 0 부터 시작, index가 저장된 거래 개수보다 작은 동안 반복 , 거래가 3개라면 0,1,2 에서 반복하고 3이되면 끝남 , index++ 반복문 안의 코드가 한번 끝날때마다 index를 1 늘려서 다음 거래로 넘어감
+            TaxTransactionDto left = existing.get(index); // existing.get(index)로 저장된 모곩의 index 위치에 있는 거래 한 건을 꺼내 left 에 담아 taxtransactiondto는 그 거래 객체의 타입임
+            TaxTransactionDto right = requested.get(index); // requested.get(index)로 요청 목록의 같은 위치에 있는 거래 한건을 꺼내 right에 담아. 앞에서 두 목록의 길이가 같은지 확인했으므로 같은 index를 쓸수있음
+ // ex: index가 1 이면 저장된 두번쨰 거래를 left에 , 요청한 두번쨰 거래를 right에 담는다.
+            if (!Objects.equals(left.getTransactionType(), right.getTransactionType()) // 두 거래의 거래 유형이 다른지 확인
+                    || !Objects.equals(left.getTransactionDate(), right.getTransactionDate()) // 거래날짜가 다른지 확인
+                    || !Objects.equals(left.getDescription(), right.getDescription()) // 거래 설명이 다른지 확인
+                    || !Objects.equals(left.getCategory(), right.getCategory()) // 카테고리가 다른지 확인
+                    || !sameDecimal(left.getAmount(), right.getAmount()) //  거래 금액의 숫자 값이 다른지 확인
+                    || !sameDecimal(left.getPreTaxIncome(), right.getPreTaxIncome()) // 세전 소득의 숫자 값이 다른지 확인
+                    || !sameDecimal(left.getDeductedTaxRate(), right.getDeductedTaxRate())) { // 공제된 세율의 숫자 값이 다른지 확인
+                return false; // 다른 항목을 하나라도 발견시 false를 돌려주고 메서드 전체를 즉시 끝냄
             }
         }
 
-        return true;
+        return true; // 반복문을 끝까지 통과했으므로 비교한 모든 거래가 같은 위치에서 일치한다
     }
 
-    private boolean sameDecimal(BigDecimal left, BigDecimal right) {
-        if (left == null || right == null) {
-            return left == right;
+    private boolean sameDecimal(BigDecimal left, BigDecimal right) { // samedecimal 은 두 숫자의 값이 같으면 true , 다르면 false 반환 , 둘다 null 인 경우도 같다고 판단
+        if (left == null || right == null) { // left나 right 중 하나라도 null이면 이 블록으로 들어감
+            return left == right; // 이 줄에 도달했을때는 적어도 하나가 null임 , 둘다 null 이면 true, 한쪽만 null이면 false 반환
         }
 
-        return left.compareTo(right) == 0;
+        return left.compareTo(right) == 0; // 두 값이 모두 있을때 숫자 크기를 비교, compareto 의 결과가 0이면 두 숫자의 값이 같다는 뜻이므로 true 를 반환, 1.0과 1.00도 똑같이 true 임
     }
 
-    private ApiException invalid(String field, String message) {
+    private ApiException invalid(String field, String message) { // 입력값 검증에 실패했을떄 사용할 apiexception 객체를 만들어 반환
         return new ApiException(
                 HttpStatus.BAD_REQUEST,
                 "VALIDATION_ERROR",
